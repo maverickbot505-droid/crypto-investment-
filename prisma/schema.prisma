@@ -1,0 +1,308 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                 String             @id @default(cuid())
+  email              String             @unique
+  emailVerified      DateTime?
+  phone              String?
+  phoneVerified      Boolean            @default(false)
+  passwordHash       String
+  firstName          String
+  lastName           String
+  image              String?
+  role               UserRole           @default(USER)
+  kycStatus          KYCStatus          @default(NOT_SUBMITTED)
+  balance            Decimal            @default(0) @db.Decimal(18, 2)
+  totalInvested      Decimal            @default(0) @db.Decimal(18, 2)
+  totalEarned        Decimal            @default(0) @db.Decimal(18, 2)
+  referralCode       String             @unique
+  referredBy         String?
+  referredUser       User?             @relation("Referral", fields: [referredBy], references: [id])
+  referralUsers      User[]            @relation("Referral")
+  referralEarnings   Decimal            @default(0) @db.Decimal(18, 2)
+  totalWithdrawn     Decimal            @default(0) @db.Decimal(18, 2)
+  isTwoFactorEnabled Boolean            @default(false)
+  twoFactorSecret    String?
+  isSuspended        Boolean            @default(false)
+  suspensionReason   String?
+  lastLoginAt        DateTime?
+  lastActiveAt       DateTime?
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+
+  accounts           Account[]
+  sessions           Session[]
+  kyc                KYC?
+  investments        Investment[]
+  transactions       Transaction[]
+  otps               OTP[]
+  notifications      Notification[]
+  depositMethods     UserDepositMethod[]
+  withdrawalMethods  UserWithdrawalMethod[]
+  auditLogs          AuditLog[]         @relation("AdminAudit")
+}
+
+enum UserRole {
+  USER
+  ADMIN
+  SUPER_ADMIN
+}
+
+enum KYCStatus {
+  NOT_SUBMITTED
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+model KYC {
+  id          String    @id @default(cuid())
+  userId      String    @unique
+  status      KYCStatus @default(PENDING)
+  firstName   String
+  lastName    String
+  dateOfBirth DateTime?
+  nationality String?
+  address     String?   @db.Text
+  idType      String?
+  idFrontUrl  String?
+  idBackUrl   String?
+  selfieUrl   String?
+  poaUrl      String?
+  reviewNote  String?   @db.Text
+  reviewedBy  String?
+  reviewedAt  DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model InvestmentPlan {
+  id             String       @id @default(cuid())
+  name           String
+  badge          String?
+  minAmount      Decimal      @db.Decimal(18, 2)
+  maxAmount      Decimal?     @db.Decimal(18, 2)
+  durationDays   Int
+  roiPercent     Decimal      @db.Decimal(5, 2)
+  dailyRoiPercent Decimal?    @db.Decimal(5, 2)
+  referralBonus  Decimal      @default(5.00) @db.Decimal(5, 2)
+  description    String?      @db.Text
+  features       String[]
+  isActive       Boolean      @default(true)
+  sortOrder      Int          @default(0)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  investments    Investment[]
+}
+
+model Investment {
+  id             String           @id @default(cuid())
+  userId         String
+  planId         String
+  amount         Decimal          @db.Decimal(18, 2)
+  expectedReturn Decimal          @db.Decimal(18, 2)
+  dailyEarning   Decimal?         @db.Decimal(18, 2)
+  startDate      DateTime         @default(now())
+  endDate        DateTime
+  status         InvestmentStatus @default(ACTIVE)
+  earnings       Decimal          @default(0) @db.Decimal(18, 2)
+  lastCreditedAt DateTime?
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  user User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  plan InvestmentPlan    @relation(fields: [planId], references: [id])
+}
+
+enum InvestmentStatus {
+  ACTIVE
+  COMPLETED
+  CANCELLED
+  PENDING
+}
+
+model Transaction {
+  id             String           @id @default(cuid())
+  userId         String
+  type           TransactionType
+  amount         Decimal          @db.Decimal(18, 2)
+  status         TransactionStatus
+  method         String?
+  proofUrl       String?
+  note           String?          @db.Text
+  accountDetails String?          @db.Text
+  fee            Decimal          @default(0) @db.Decimal(18, 2)
+  processedBy    String?
+  processedAt    DateTime?
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+enum TransactionType {
+  DEPOSIT
+  WITHDRAWAL
+  INVESTMENT
+  RETURN
+  REFERRAL_BONUS
+  ADMIN_CREDIT
+  ADMIN_DEBIT
+}
+
+enum TransactionStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+model OTP {
+  id        String   @id @default(cuid())
+  userId    String
+  code      String
+  type      OTPType
+  expiresAt DateTime
+  used      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+enum OTPType {
+  EMAIL_VERIFICATION
+  PHONE_VERIFICATION
+  TWO_FACTOR
+  PASSWORD_RESET
+}
+
+model SiteSetting {
+  id    String @id @default(cuid())
+  key   String @unique
+  value String @db.Text
+}
+
+model AuditLog {
+  id          String   @id @default(cuid())
+  adminId     String
+  action      String
+  targetUserId String?
+  details     String?  @db.Text
+  ipAddress   String?
+  createdAt   DateTime @default(now())
+
+  admin User @relation("AdminAudit", fields: [adminId], references: [id])
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  title     String
+  message   String   @db.Text
+  type      String   @default("INFO")
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model UserDepositMethod {
+  id      String @id @default(cuid())
+  userId  String
+  type    String
+  label   String?
+  details String? @db.Text
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model UserWithdrawalMethod {
+  id      String @id @default(cuid())
+  userId  String
+  type    String
+  label   String?
+  details String? @db.Text
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model PaymentMethod {
+  id            String  @id @default(cuid())
+  type          String
+  label         String
+  isActive      Boolean @default(true)
+  instructions  String? @db.Text
+  walletAddress String?
+  bankDetails   String? @db.Text
+  sortOrder     Int     @default(0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+enum EmailTemplateType {
+  WELCOME
+  VERIFY_EMAIL
+  RESET_PASSWORD
+  DEPOSIT_CONFIRMED
+  WITHDRAWAL_CONFIRMED
+  INVESTMENT_ACTIVATED
+  INVESTMENT_COMPLETED
+  KYC_APPROVED
+  KYC_REJECTED
+  TWO_FACTOR_CODE
+  ACCOUNT_SUSPENDED
+  ACCOUNT_UNSUSPENDED
+  REFERRAL_CREDIT
+}
+
+model EmailTemplate {
+  id      String            @id @default(cuid())
+  type    EmailTemplateType @unique
+  subject String
+  body    String            @db.Text
+}
